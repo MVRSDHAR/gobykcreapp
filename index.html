@@ -244,10 +244,11 @@
 
   // ====== Tabs + back navigation ======
   let currentTab = 'search';
+  let cardOpen = false;
   const navHistory = []; // stack of previous tab names
 
   function updateBackButton(){
-    $('#backBtn').style.display = navHistory.length ? 'flex' : 'none';
+    $('#backBtn').style.display = (navHistory.length || cardOpen) ? 'flex' : 'none';
   }
 
   function goToTab(name, recordHistory){
@@ -257,7 +258,10 @@
     currentTab = name;
     document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.tab === name));
     document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active', v.id === 'view-'+name));
-    if(name === 'today') loadTodayList();
+    if(name === 'today'){
+      loadTodayList();
+      cardOpen = false;
+    }
     updateBackButton();
   }
 
@@ -266,9 +270,14 @@
   });
 
   $('#backBtn').addEventListener('click', ()=>{
-    if(!navHistory.length) return;
-    const prev = navHistory.pop();
-    goToTab(prev, false);
+    if(navHistory.length){
+      const prev = navHistory.pop();
+      goToTab(prev, false);
+    } else if(cardOpen){
+      $('#searchResults').innerHTML = '';
+      $('#searchInput').value = '';
+      cardOpen = false;
+    }
     updateBackButton();
   });
 
@@ -291,6 +300,8 @@
       const data = await apiCall({ action:'lookup', mobile });
       if(!data.found){
         results.innerHTML = `<div class="empty">No customer found for this number.</div>`;
+        cardOpen = true;
+        updateBackButton();
       } else {
         renderCustomerCard(data.customer);
       }
@@ -302,15 +313,20 @@
     }
   }
 
-  function renderCustomerCard(c){
-    const historyHtml = (c.callHistory && c.callHistory.length)
-      ? c.callHistory.map(h => `
+  function buildHistoryHtml(callHistory){
+    return (callHistory && callHistory.length)
+      ? callHistory.map(h => `
           <div class="history-item">
             <div class="history-outcome">${h.outcome || '—'} <span class="history-meta">· ${h.direction || ''}</span></div>
             <div class="history-meta">${h.cre ? h.cre + ' · ' : ''}${formatDate(h.timestamp)}</div>
             ${h.notes ? `<div class="history-notes">${escapeHtml(h.notes)}</div>` : ''}
           </div>`).join('')
       : `<div class="hint" style="margin:0;">No previous calls logged for this number.</div>`;
+  }
+
+  function renderCustomerCard(c){
+    const historyHtml = buildHistoryHtml(c.callHistory);
+    cardOpen = true;
 
     $('#searchResults').innerHTML = `
       <div class="card" id="custCard">
@@ -351,9 +367,10 @@
         </div>
 
         <div class="history-title">Call History</div>
-        ${historyHtml}
+        <div id="historyList">${historyHtml}</div>
       </div>
     `;
+    updateBackButton();
   }
 
   function toggleOutcomeForm(){
@@ -381,7 +398,11 @@
       });
       showToast('Call logged');
       $('#outcomeNotes').value = '';
-      doSearch(); // refresh card with updated history
+      // Refresh just the call history, keep the form open and card as-is
+      const data = await apiCall({ action:'lookup', mobile });
+      if(data.found){
+        $('#historyList').innerHTML = buildHistoryHtml(data.customer.callHistory);
+      }
     }catch(e){
       showToast('Could not save - try again');
     }
