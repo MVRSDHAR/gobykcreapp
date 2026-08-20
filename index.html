@@ -73,6 +73,13 @@
 
   /* Search */
   .search-row{display:flex;gap:8px;margin-bottom:14px;}
+  .search-type-row{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;}
+  .chip{
+    padding:8px 14px;border-radius:100px;border:1px solid var(--border);
+    background:var(--surface);color:var(--text-soft);font-size:12.5px;font-weight:700;
+    cursor:pointer;font-family:inherit;
+  }
+  .chip.active{background:var(--orange);border-color:var(--orange);color:#fff;}
   input[type=tel], input[type=text]{
     flex:1;padding:13px 14px;border-radius:12px;border:1px solid var(--border);
     background:var(--surface);font-size:15px;font-family:inherit;color:var(--text);
@@ -181,20 +188,30 @@
         <input type="text" id="creName" placeholder="e.g. CRE2 or your name">
       </div>
 
+      <div class="search-type-row" id="searchTypeRow">
+        <button class="chip active" data-field="mobile">Mobile</button>
+        <button class="chip" data-field="vehicleNumber">Vehicle No.</button>
+        <button class="chip" data-field="vehicleModel">Model</button>
+        <button class="chip" data-field="branch">Branch</button>
+      </div>
+
       <div class="search-row">
         <input type="tel" id="searchInput" placeholder="Enter mobile number" inputmode="numeric">
         <button class="btn btn-primary" id="searchBtn">Search</button>
       </div>
-      <p class="hint">Type any 10-digit number to pull up the customer's vehicle, service status and past call notes.</p>
+      <p class="hint" id="searchHint">Type any 10-digit number to pull up the customer's vehicle, service status and past call notes.</p>
 
       <div id="searchResults"></div>
     </section>
 
     <!-- TODAY'S LIST VIEW -->
     <section class="view" id="view-today">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;">
         <p class="hint" style="margin:0;">Today's overdue-service batch</p>
-        <button class="btn btn-outline" id="refreshListBtn" style="padding:8px 12px;font-size:12.5px;">Refresh</button>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-outline" id="sortToggleBtn" style="padding:8px 12px;font-size:12.5px;white-space:nowrap;">Most overdue first &#8595;</button>
+          <button class="btn btn-outline" id="refreshListBtn" style="padding:8px 12px;font-size:12.5px;">Refresh</button>
+        </div>
       </div>
       <div id="todayListContainer"><div class="empty">Loading...</div></div>
     </section>
@@ -282,10 +299,41 @@
   });
 
   // ====== SEARCH ======
+  let searchField = 'mobile';
+  const searchConfig = {
+    mobile: { placeholder: 'Enter mobile number', inputmode: 'numeric', type: 'tel', hint: "Type any 10-digit number to pull up the customer's vehicle, service status and past call notes." },
+    vehicleNumber: { placeholder: 'e.g. TS09 AB 1234', inputmode: 'text', type: 'text', hint: 'Type any part of the vehicle number to find matching customers.' },
+    vehicleModel: { placeholder: 'e.g. Pulsar, Activa', inputmode: 'text', type: 'text', hint: 'Type a vehicle model to see all matching customers.' },
+    branch: { placeholder: 'e.g. Kukatpally', inputmode: 'text', type: 'text', hint: 'Type a branch name to see all matching customers.' }
+  };
+
+  document.querySelectorAll('.chip').forEach(chip=>{
+    chip.addEventListener('click', ()=>{
+      document.querySelectorAll('.chip').forEach(c=>c.classList.remove('active'));
+      chip.classList.add('active');
+      searchField = chip.dataset.field;
+      const cfg = searchConfig[searchField];
+      const input = $('#searchInput');
+      input.placeholder = cfg.placeholder;
+      input.setAttribute('inputmode', cfg.inputmode);
+      input.type = cfg.type;
+      input.value = '';
+      $('#searchHint').textContent = cfg.hint;
+      $('#searchResults').innerHTML = '';
+      cardOpen = false;
+      updateBackButton();
+    });
+  });
+
   $('#searchBtn').addEventListener('click', doSearch);
   $('#searchInput').addEventListener('keydown', e=>{ if(e.key==='Enter') doSearch(); });
 
   async function doSearch(){
+    if(searchField === 'mobile') return doMobileSearch();
+    return doFieldSearch();
+  }
+
+  async function doMobileSearch(){
     const mobile = $('#searchInput').value.trim();
     const results = $('#searchResults');
     if(mobile.replace(/\D/g,'').length < 10){
@@ -312,6 +360,67 @@
       btn.textContent = 'Search';
     }
   }
+
+  async function doFieldSearch(){
+    const query = $('#searchInput').value.trim();
+    const results = $('#searchResults');
+    if(!query){
+      results.innerHTML = `<div class="empty">Type something to search.</div>`;
+      return;
+    }
+    const btn = $('#searchBtn');
+    btn.disabled = true;
+    btn.innerHTML = `<span class="spinner"></span>`;
+    results.innerHTML = '';
+    try{
+      const data = await apiCall({ action:'search', field: searchField, query });
+      if(!data.results || !data.results.length){
+        results.innerHTML = `<div class="empty">No matching customers found.</div>`;
+        cardOpen = true;
+        updateBackButton();
+      } else {
+        renderSearchResultsList(data.results);
+      }
+    } catch(err){
+      results.innerHTML = `<div class="empty">Couldn't reach the server. Check your connection and try again.</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Search';
+    }
+  }
+
+  function renderSearchResultsList(list){
+    cardOpen = true;
+    $('#searchResults').innerHTML = `
+      <p class="hint" style="margin:0 0 10px;">${list.length} match${list.length>1?'es':''} — tap one to view full details</p>
+      ${list.map(item => `
+        <div class="list-item" style="cursor:pointer;" onclick="jumpToMobileLookup('${item.mobile}')">
+          <div class="list-item-top">
+            <div>
+              <div class="list-name">${escapeHtml(item.customerName) || 'Name not on file'}</div>
+              <div class="list-sub">${escapeHtml(item.vehicleModel)} · ${escapeHtml(item.vehicleNumber)}</div>
+              <div class="list-sub">${escapeHtml(item.branch)} · ${escapeHtml(item.mobile)}</div>
+            </div>
+            ${overdueBadge(item.daysOverdue)}
+          </div>
+        </div>
+      `).join('')}
+    `;
+    updateBackButton();
+  }
+
+  window.jumpToMobileLookup = function(mobile){
+    document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('active', c.dataset.field==='mobile'));
+    searchField = 'mobile';
+    const cfg = searchConfig.mobile;
+    const input = $('#searchInput');
+    input.placeholder = cfg.placeholder;
+    input.setAttribute('inputmode', cfg.inputmode);
+    input.type = cfg.type;
+    input.value = mobile;
+    $('#searchHint').textContent = cfg.hint;
+    doMobileSearch();
+  };
 
   function buildHistoryHtml(callHistory){
     return (callHistory && callHistory.length)
@@ -411,41 +520,69 @@
   // ====== TODAY'S LIST ======
   $('#refreshListBtn').addEventListener('click', loadTodayList);
 
+  let todayListData = [];
+  let sortDir = 'desc'; // 'desc' = most overdue first, 'asc' = least overdue first
+
+  $('#sortToggleBtn').addEventListener('click', ()=>{
+    sortDir = sortDir === 'desc' ? 'asc' : 'desc';
+    $('#sortToggleBtn').innerHTML = sortDir === 'desc' ? 'Most overdue first &#8595;' : 'Least overdue first &#8593;';
+    renderTodayList();
+  });
+
   async function loadTodayList(){
     const container = $('#todayListContainer');
     container.innerHTML = `<div class="empty">Loading...</div>`;
     try{
       const data = await apiCall({ action:'todayList', cre: '' });
-      if(!data.list || !data.list.length){
-        container.innerHTML = `<div class="empty">No calls in today's batch.</div>`;
-        return;
-      }
-      container.innerHTML = data.list.map(item => `
-        <div class="list-item">
-          <div class="list-item-top">
-            <div>
-              <div class="list-name">${escapeHtml(item.customerName) || 'Name not on file'}</div>
-              <div class="list-sub">${escapeHtml(item.vehicleModel)} · ${escapeHtml(item.vehicleNumber)}</div>
-              <div class="list-sub">${escapeHtml(item.branch)}${item.assignedTo ? ' · ' + escapeHtml(item.assignedTo) : ''}</div>
-            </div>
-            ${overdueBadge(item.daysOverdue)}
-          </div>
-          <div class="list-actions">
-            <a class="btn btn-primary" style="text-align:center;text-decoration:none;" href="${telLink(item.mobile)}" onclick="logDial('${item.mobile}','${escapeAttr(item.customerName)}','${escapeAttr(item.vehicleNumber)}','Outbound')">Call ${item.mobile}</a>
-            <button class="btn btn-outline" onclick="quickLog('${item.mobile}','${escapeAttr(item.customerName)}','${escapeAttr(item.vehicleNumber)}')">Log</button>
-          </div>
-        </div>
-      `).join('');
+      todayListData = data.list || [];
+      renderTodayList();
     } catch(err){
       container.innerHTML = `<div class="empty">Couldn't load the list. Check your connection.</div>`;
     }
   }
 
+  function renderTodayList(){
+    const container = $('#todayListContainer');
+    if(!todayListData.length){
+      container.innerHTML = `<div class="empty">No calls in today's batch.</div>`;
+      return;
+    }
+    const sorted = [...todayListData].sort((a,b)=>{
+      const da = Number(a.daysOverdue) || 0;
+      const db = Number(b.daysOverdue) || 0;
+      return sortDir === 'desc' ? db - da : da - db;
+    });
+    container.innerHTML = sorted.map(item => `
+      <div class="list-item">
+        <div class="list-item-top">
+          <div>
+            <div class="list-name">${escapeHtml(item.customerName) || 'Name not on file'}</div>
+            <div class="list-sub">${escapeHtml(item.vehicleModel)} · ${escapeHtml(item.vehicleNumber)}</div>
+            <div class="list-sub">${escapeHtml(item.branch)}${item.assignedTo ? ' · ' + escapeHtml(item.assignedTo) : ''}</div>
+          </div>
+          ${overdueBadge(item.daysOverdue)}
+        </div>
+        <div class="list-actions">
+          <a class="btn btn-primary" style="text-align:center;text-decoration:none;" href="${telLink(item.mobile)}" onclick="logDial('${item.mobile}','${escapeAttr(item.customerName)}','${escapeAttr(item.vehicleNumber)}','Outbound')">Call ${item.mobile}</a>
+          <button class="btn btn-outline" onclick="quickLog('${item.mobile}','${escapeAttr(item.customerName)}','${escapeAttr(item.vehicleNumber)}')">Log</button>
+        </div>
+      </div>
+    `).join('');
+  }
+
   window.quickLog = function(mobile, name, vehicle){
-    // Jump to search tab with this number pre-filled and outcome form open
+    // Jump to search tab, force Mobile search mode, with this number pre-filled and outcome form open
     goToTab('search');
-    $('#searchInput').value = mobile;
-    doSearch().then(()=>{
+    document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('active', c.dataset.field==='mobile'));
+    searchField = 'mobile';
+    const cfg = searchConfig.mobile;
+    const input = $('#searchInput');
+    input.placeholder = cfg.placeholder;
+    input.setAttribute('inputmode', cfg.inputmode);
+    input.type = cfg.type;
+    input.value = mobile;
+    $('#searchHint').textContent = cfg.hint;
+    doMobileSearch().then(()=>{
       setTimeout(()=>{ const f = $('#outcomeForm'); if(f) f.style.display='block'; }, 300);
     });
   };
