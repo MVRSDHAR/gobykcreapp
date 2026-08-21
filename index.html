@@ -80,6 +80,9 @@
     cursor:pointer;font-family:inherit;
   }
   .chip.active{background:var(--orange);border-color:var(--orange);color:#fff;}
+  .range-row{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;}
+  .custom-range-row{display:flex;gap:8px;margin-bottom:14px;}
+  .custom-range-row input{flex:1;padding:11px 12px;border-radius:12px;border:1px solid var(--border);background:var(--surface);font-size:14px;font-family:inherit;color:var(--text);}
   input[type=tel], input[type=text]{
     flex:1;padding:13px 14px;border-radius:12px;border:1px solid var(--border);
     background:var(--surface);font-size:15px;font-family:inherit;color:var(--text);
@@ -206,8 +209,21 @@
 
     <!-- TODAY'S LIST VIEW -->
     <section class="view" id="view-today">
+      <div class="range-row" id="rangeRow">
+        <button class="chip active" data-range="assigned">Assigned List</button>
+        <button class="chip" data-range="90-180">90-180 days</button>
+        <button class="chip" data-range="181-270">181-270 days</button>
+        <button class="chip" data-range="271-365">271-365 days</button>
+        <button class="chip" data-range="custom">Custom</button>
+      </div>
+      <div class="custom-range-row" id="customRangeRow" style="display:none;">
+        <input type="number" id="customMin" placeholder="Min days" inputmode="numeric">
+        <input type="number" id="customMax" placeholder="Max days" inputmode="numeric">
+        <button class="btn btn-primary" id="customRangeGoBtn" style="padding:11px 16px;font-size:13px;">Go</button>
+      </div>
+
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;">
-        <p class="hint" style="margin:0;">Today's overdue-service batch</p>
+        <p class="hint" style="margin:0;" id="listModeLabel">Today's assigned batch</p>
         <div style="display:flex;gap:6px;">
           <button class="btn btn-outline" id="sortToggleBtn" style="padding:8px 12px;font-size:12.5px;white-space:nowrap;">Most overdue first &#8595;</button>
           <button class="btn btn-outline" id="refreshListBtn" style="padding:8px 12px;font-size:12.5px;">Refresh</button>
@@ -276,7 +292,11 @@
     document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.tab === name));
     document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active', v.id === 'view-'+name));
     if(name === 'today'){
-      loadTodayList();
+      if(typeof currentRangeMode !== 'undefined' && currentRangeMode === 'range'){
+        loadRangeList(currentRangeMin, currentRangeMax);
+      } else {
+        loadTodayList();
+      }
       cardOpen = false;
     }
     updateBackButton();
@@ -307,9 +327,9 @@
     branch: { placeholder: 'e.g. Kukatpally', inputmode: 'text', type: 'text', hint: 'Type a branch name to see all matching customers.' }
   };
 
-  document.querySelectorAll('.chip').forEach(chip=>{
+  document.querySelectorAll('#searchTypeRow .chip').forEach(chip=>{
     chip.addEventListener('click', ()=>{
-      document.querySelectorAll('.chip').forEach(c=>c.classList.remove('active'));
+      document.querySelectorAll('#searchTypeRow .chip').forEach(c=>c.classList.remove('active'));
       chip.classList.add('active');
       searchField = chip.dataset.field;
       const cfg = searchConfig[searchField];
@@ -410,7 +430,7 @@
   }
 
   window.jumpToMobileLookup = function(mobile){
-    document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('active', c.dataset.field==='mobile'));
+    document.querySelectorAll('#searchTypeRow .chip').forEach(c=>c.classList.toggle('active', c.dataset.field==='mobile'));
     searchField = 'mobile';
     const cfg = searchConfig.mobile;
     const input = $('#searchInput');
@@ -518,15 +538,62 @@
   };
 
   // ====== TODAY'S LIST ======
-  $('#refreshListBtn').addEventListener('click', loadTodayList);
+  $('#refreshListBtn').addEventListener('click', ()=>{
+    if(currentRangeMode === 'assigned') loadTodayList();
+    else loadRangeList(currentRangeMin, currentRangeMax);
+  });
 
   let todayListData = [];
   let sortDir = 'desc'; // 'desc' = most overdue first, 'asc' = least overdue first
+  let currentRangeMode = 'assigned';
+  let currentRangeMin = null;
+  let currentRangeMax = null;
 
   $('#sortToggleBtn').addEventListener('click', ()=>{
     sortDir = sortDir === 'desc' ? 'asc' : 'desc';
     $('#sortToggleBtn').innerHTML = sortDir === 'desc' ? 'Most overdue first &#8595;' : 'Least overdue first &#8593;';
     renderTodayList();
+  });
+
+  document.querySelectorAll('#rangeRow .chip').forEach(chip=>{
+    chip.addEventListener('click', ()=>{
+      document.querySelectorAll('#rangeRow .chip').forEach(c=>c.classList.remove('active'));
+      chip.classList.add('active');
+      const range = chip.dataset.range;
+
+      if(range === 'custom'){
+        $('#customRangeRow').style.display = 'flex';
+        return; // wait for Go tap
+      }
+      $('#customRangeRow').style.display = 'none';
+
+      if(range === 'assigned'){
+        currentRangeMode = 'assigned';
+        $('#listModeLabel').textContent = "Today's assigned batch";
+        loadTodayList();
+      } else {
+        const [lo, hi] = range.split('-').map(Number);
+        currentRangeMode = 'range';
+        currentRangeMin = lo;
+        currentRangeMax = hi;
+        $('#listModeLabel').textContent = `${lo}-${hi} days overdue`;
+        loadRangeList(lo, hi);
+      }
+    });
+  });
+
+  $('#customRangeGoBtn').addEventListener('click', ()=>{
+    const lo = Number($('#customMin').value);
+    const hi = Number($('#customMax').value);
+    if(!$('#customMin').value || !$('#customMax').value || isNaN(lo) || isNaN(hi) || lo > hi){
+      showToast('Enter a valid min/max range');
+      return;
+    }
+    currentRangeMode = 'range';
+    currentRangeMin = lo;
+    currentRangeMax = hi;
+    $('#listModeLabel').textContent = `${lo}-${hi} days overdue`;
+    loadRangeList(lo, hi);
   });
 
   async function loadTodayList(){
@@ -536,6 +603,21 @@
       const data = await apiCall({ action:'todayList', cre: '' });
       todayListData = data.list || [];
       renderTodayList();
+    } catch(err){
+      container.innerHTML = `<div class="empty">Couldn't load the list. Check your connection.</div>`;
+    }
+  }
+
+  async function loadRangeList(lo, hi){
+    const container = $('#todayListContainer');
+    container.innerHTML = `<div class="empty">Loading...</div>`;
+    try{
+      const data = await apiCall({ action:'rangeSearch', minDays: lo, maxDays: hi, limit: 100 });
+      todayListData = data.list || [];
+      renderTodayList();
+      if(typeof data.totalMatched === 'number' && data.totalMatched > todayListData.length){
+        $('#listModeLabel').textContent = `${lo}-${hi} days overdue — showing ${todayListData.length} of ${data.totalMatched}`;
+      }
     } catch(err){
       container.innerHTML = `<div class="empty">Couldn't load the list. Check your connection.</div>`;
     }
@@ -573,7 +655,7 @@
   window.quickLog = function(mobile, name, vehicle){
     // Jump to search tab, force Mobile search mode, with this number pre-filled and outcome form open
     goToTab('search');
-    document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('active', c.dataset.field==='mobile'));
+    document.querySelectorAll('#searchTypeRow .chip').forEach(c=>c.classList.toggle('active', c.dataset.field==='mobile'));
     searchField = 'mobile';
     const cfg = searchConfig.mobile;
     const input = $('#searchInput');
